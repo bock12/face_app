@@ -33,8 +33,9 @@ recognizer = FaceRecognizerDL(known_encodings, known_names, UNKNOWN_DIR)
 # Unknown Faces Tab
 # -----------------------
 class UnknownFacesTab(QWidget):
-    def __init__(self):
+    def __init__(self, known_faces_tab):
         super().__init__()
+        self.known_faces_tab = known_faces_tab
         layout = QVBoxLayout()
 
         scroll = QScrollArea()
@@ -101,7 +102,8 @@ class UnknownFacesTab(QWidget):
             occupation = occupation_input.text()
 
             if not name.strip():
-                QMessageBox.warning(dialog, "Error", "Name is required!")
+                self.show_toast("Promoted successfully!")
+
                 return
 
             conn = connect_db()
@@ -118,11 +120,60 @@ class UnknownFacesTab(QWidget):
             conn.close()
 
             QMessageBox.information(dialog, "Success", "Promoted to known faces!")
+            
+
+            self.refresh_unknown_faces_tab()
+            self.known_faces_tab.load_known_faces()
             dialog.accept()
 
         save_button.clicked.connect(promote)
         dialog.setLayout(layout)
         dialog.exec_()
+
+
+    def refresh_unknown_faces_tab(self):
+    # Clear the current grid layout
+        for i in reversed(range(self.grid.count())):
+            widget = self.grid.itemAt(i).widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        # Reload faces from database
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT id, image_path, encoding FROM unknown_faces ORDER BY date_detected DESC")
+        self.faces = c.fetchall()
+        conn.close()
+
+        for i, (face_id, path, encoding_blob) in enumerate(self.faces):
+            btn = QPushButton()
+            pixmap = QPixmap(path).scaled(100, 100, Qt.KeepAspectRatio)
+            btn.setIcon(QIcon(pixmap))
+            btn.setIconSize(pixmap.size())
+            btn.setFixedSize(120, 120)
+            btn.clicked.connect(lambda _, p=path, e=encoding_blob, id=face_id: self.show_face_detail(p, e, id))
+            self.grid.addWidget(btn, i // 4, i % 4)
+
+
+    def show_toast(self, message, duration=2000):
+        toast = QLabel(message, self)
+        toast.setStyleSheet("""
+            QLabel {
+                background-color: #28a745;
+                color: white;
+                padding: 10px;
+                border-radius: 8px;
+            }
+        """)
+        toast.setAlignment(Qt.AlignCenter)
+        toast.setFixedWidth(200)
+        toast.move(
+            (self.width() - toast.width()) // 2,
+            50  # You can adjust vertical position
+        )
+        toast.show()
+
+        QTimer.singleShot(duration, toast.deleteLater)
 
 # -----------------------
 # Live Feed Tab
@@ -184,7 +235,7 @@ class KnownFacesTab(QWidget):
 
         self.table = QTableWidget()
         self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["Name", "Image", "Details", "Promote"])
+        self.table.setHorizontalHeaderLabels(["Name", "Contact", "Occupation", "Photo"])
         self.table.horizontalHeader().setStretchLastSection(True)
 
         layout.addWidget(self.search_bar)
@@ -229,8 +280,9 @@ class MainWindow(QMainWindow):
 
         tabs = QTabWidget()
         tabs.addTab(LiveFeedTab(), "Live Feed")
-        tabs.addTab(UnknownFacesTab(), "Unknown Faces")
+        
         self.known_faces_tab = KnownFacesTab(connect_db())
+        tabs.addTab(UnknownFacesTab(self.known_faces_tab), "Unknown Faces")
         tabs.addTab(self.known_faces_tab, "Known Faces")
 
         self.setCentralWidget(tabs)
