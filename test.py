@@ -224,7 +224,7 @@ class KnownFacesTab(QWidget):
         self.setLayout(layout)
 
     def load_known_faces(self):
-        self.cursor.execute("SELECT id, name, image_path FROM known_faces")
+        self.cursor.execute("SELECT id, name, contact, occupation, image_path FROM known_faces")
         self.known_faces = self.cursor.fetchall()
         self.display_faces(self.known_faces)
 
@@ -234,14 +234,24 @@ class KnownFacesTab(QWidget):
 
     def display_faces(self, faces):
         self.table.setRowCount(0)
-        for row_index, (face_id, name, image_path) in enumerate(faces):
+        for row_index, (face_id, name, contact, occupation, image_path) in enumerate(faces):
+
             self.table.insertRow(row_index)
+
             self.table.setItem(row_index, 0, QTableWidgetItem(name))
+            self.table.setItem(row_index, 1, QTableWidgetItem(contact))
+            self.table.setItem(row_index, 2, QTableWidgetItem(occupation))
 
             image_label = QLabel()
-            pixmap = QPixmap(image_path)
-            image_label.setPixmap(pixmap.scaled(60, 60, Qt.KeepAspectRatio))
-            self.table.setCellWidget(row_index, 1, image_label)
+
+            if image_path and os.path.exists(image_path):
+                pixmap = QPixmap(image_path).scaled(60, 60, Qt.KeepAspectRatio)
+            else:
+                pixmap = QPixmap('placeholder.png').scaled(60, 60, Qt.KeepAspectRatio)
+            image_label.setPixmap(pixmap)
+
+            image_label.mousePressEvent = lambda event, fid=face_id: self.open_edit_dialog(fid)
+            self.table.setCellWidget(row_index, 3, image_label)
 
             details_button = QPushButton("View")
             promote_button = QPushButton("Promote")
@@ -249,6 +259,91 @@ class KnownFacesTab(QWidget):
             # Optional: Connect button slots for details/promote
             self.table.setCellWidget(row_index, 2, details_button)
             self.table.setCellWidget(row_index, 3, promote_button)
+
+    def open_edit_dialog(self, face_id):
+        conn = connect_db()
+        c = conn.cursor()
+        c.execute("SELECT name, contact, occupation, image_path FROM known_faces WHERE id = ?", (face_id,))
+        result = c.fetchone()
+        conn.close()
+
+        if not result:
+            QMessageBox.warning(self, "Error", "Face not found!")
+            return
+
+        name, contact, occupation, image_path = result
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Edit Known Face")
+        layout = QVBoxLayout()
+
+        name_input = QLineEdit(name)
+        contact_input = QLineEdit(contact)
+        occupation_input = QLineEdit(occupation)
+
+        layout.addWidget(QLabel("Name"))
+        layout.addWidget(name_input)
+        layout.addWidget(QLabel("Contact"))
+        layout.addWidget(contact_input)
+        layout.addWidget(QLabel("Occupation"))
+        layout.addWidget(occupation_input)
+
+        button_layout = QVBoxLayout()
+
+        save_button = QPushButton("Save Changes")
+        delete_button = QPushButton("Delete Face")
+
+        button_layout.addWidget(save_button)
+        button_layout.addWidget(delete_button)
+        layout.addLayout(button_layout)
+
+        def save_changes():
+            new_name = name_input.text()
+            new_contact = contact_input.text()
+            new_occupation = occupation_input.text()
+
+            conn = connect_db()
+            c = conn.cursor()
+            c.execute("""
+                UPDATE known_faces
+                SET name = ?, contact = ?, occupation = ?
+                WHERE id = ?
+            """, (new_name, new_contact, new_occupation, face_id))
+            conn.commit()
+            conn.close()
+
+            QMessageBox.information(dialog, "Success", "Face information updated!")
+            self.load_known_faces()
+            dialog.accept()
+
+        def delete_face():
+            confirm = QMessageBox.question(dialog, "Confirm Delete", "Are you sure you want to delete this face?", 
+                                        QMessageBox.Yes | QMessageBox.No)
+            if confirm == QMessageBox.Yes:
+                conn = connect_db()
+                c = conn.cursor()
+                c.execute("DELETE FROM known_faces WHERE id = ?", (face_id,))
+                conn.commit()
+                conn.close()
+
+                # Optionally also delete the image file from disk
+                try:
+                    if os.path.exists(image_path):
+                        os.remove(image_path)
+                except Exception as e:
+                    print(f"Error deleting image: {e}")
+
+                QMessageBox.information(dialog, "Deleted", "Face deleted successfully!")
+                self.load_known_faces()
+                dialog.accept()
+
+        save_button.clicked.connect(save_changes)
+        delete_button.clicked.connect(delete_face)
+
+        dialog.setLayout(layout)
+        dialog.exec_()
+
+
 
 # -----------------------
 # Main Window

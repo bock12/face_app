@@ -237,6 +237,7 @@ class KnownFacesTab(QWidget):
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["Name", "Contact", "Occupation", "Photo"])
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setSortingEnabled(True)
 
         layout.addWidget(self.search_bar)
         layout.addWidget(self.table)
